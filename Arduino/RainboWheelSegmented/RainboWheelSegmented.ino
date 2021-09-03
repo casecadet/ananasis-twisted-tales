@@ -13,8 +13,6 @@
 *           - TBD: brightness
 *******************/
 
-// TODO: 5-clicks switches mode, between holding to adjust brightness or startPixel
-
 #include <Encoder.h>
 #include <Adafruit_NeoPixel.h>
 #include <EncButton.h>
@@ -43,18 +41,19 @@ int vmax = 100;
 float totalRainbows = .5;
 int startPixel = 100;
 int staticSaturation = 50;
+int LEDcount = strip.numPixels();
 long oldPosition = 0;
+bool logging = false;
 
-int brightness = 25;
+int brightness = 20;
 int dimmerDirection = 1;
 float dimmerFactor = .10; // Percent brighter or darker with each step
 int maxBright = 50;
 int minBright = 5;
 
-int maxStartPixel = 100; // strip.numPixels();?
 
-// WIP: modes for hold adjustment
-int mode = 4;
+// Todo: switch modes to Enum type for readability
+int mode = 1;
 
 void setup() {
 
@@ -66,14 +65,13 @@ void setup() {
 
   // EncButton Setup
   enc.counter = 100;      // изменение счётчика
-  //enc.setHoldTimeout(500);  // установка таймаута удержания кнопки
-  enc.attach(HOLDED_HANDLER, myHolded);
-  enc.attach(STEP_HANDLER, myStep);
-  enc.attach(CLICKS_HANDLER, myClicks);
+  enc.attach(HOLDED_HANDLER, reverseDimmer);
+  enc.attach(STEP_HANDLER, handleStep);
+  enc.attach(CLICKS_HANDLER, handleClicks);
 }
 
 // Adjust rainbow density using click
-void myClick() {
+void setDensity() {
   totalRainbows /= 2;
 
   if(totalRainbows < .125){
@@ -82,18 +80,15 @@ void myClick() {
 }
 
 // Switch dimmer direction when starting to hold
-void myHolded() {
+void reverseDimmer() {
   dimmerDirection *= -1;
 }
 
 // Adjust brightness by holding button 
-void myStep() {  
-    Serial.print("Mode ");
-    Serial.print(mode);
-    Serial.print("step");
+void handleStep() {  
 
   // First mode: brightness
-  if (mode < 5){
+  if (mode == 1){
     // Linear Step
     brightness += dimmerDirection;
   
@@ -117,55 +112,94 @@ void myStep() {
     }
     strip.setBrightness(brightness);
   
-    // Logging
-    Serial.print("\n");
-    Serial.print("Brightness: ");
-    Serial.print("\t");
-    Serial.print(brightness);
-    Serial.print("\t");
-    Serial.print("dimmer: ");
-    Serial.print("\t");
-    Serial.print(dimmerDirection);
+    if(logging){
+      Serial.print("\n");
+      Serial.print(dimmerDirection);
+      Serial.print("\t");
+      Serial.print("Brightness: ");
+      Serial.print("\t");
+      Serial.print(brightness);
+      Serial.print("\t");
+    }
   }
 
   // Adjust startPixel
-  else if (mode == 5){
+  else if (mode == 2){
     
     // Linear Step
     startPixel += dimmerDirection * 5;
   
-    if (startPixel >= maxStartPixel){
-      startPixel = maxStartPixel;
+    if (startPixel >= LEDcount){
+      startPixel = LEDcount;
     }
     else if (startPixel <= 0){
       startPixel = 0;
     }
 
     // Logging
-    Serial.print("\n");
-    Serial.print("Dimmer: ");
-    Serial.print("\t");
-    Serial.print(dimmerDirection);
-    Serial.print("\t");
-    Serial.print("startPixel: ");
-    Serial.print("\t");
-    Serial.print(startPixel);
+    if(logging){
+      Serial.print("\n");
+      Serial.print(dimmerDirection);
+      Serial.print("\t");
+      Serial.print("startPixel: ");
+      Serial.print("\t");
+      Serial.print(startPixel);
+    }
+  }
+
+  // Adjust total LEDs
+  else if (mode == 3){
+
+    // Linear Step
+    LEDcount += dimmerDirection * 10;
+  
+    if (LEDcount >= strip.numPixels()){
+      LEDcount = strip.numPixels();
+    }
+    else if (LEDcount <= 0){
+      LEDcount = 0;
+    }
+
+    // Clear removed pixels
+    if(dimmerDirection < 0){
+      strip.clear();
+    }
+
+    if(logging){
+      Serial.print("\n");
+      Serial.print(dimmerDirection);
+      Serial.print("\t");
+      Serial.print("LEDcount: ");
+      Serial.print("\t");
+      Serial.print(LEDcount);
+    }
   }
   
 }
-void myClicks() {
-  Serial.println(enc.clicks);
-
+void handleClicks() {
+  // For single click, adjust density
   if (enc.clicks < 2){
-    myClick();
+    setDensity();
   }
-  else if (enc.clicks == 4){
-    mode = 4;
-  }
-  else if (enc.clicks == 5 ){
-    mode = 5;
-  }
-  // TODO: Add mode 6 for num LEDs?
+  // 5 clicks switches hold-mode
+  else if (enc.clicks == 5){
+    mode++;
+
+    if (mode > 3){
+      mode = 1;
+    }
+
+    // Reset dimmer direction for consistency
+    dimmerDirection = 1;
+
+    // Display mode in first few LEDs
+    strip.clear();
+    for (int i = 0; i < mode; i++){
+      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(baseHue, 100)));
+    }
+    strip.show(); // Update strip with new contents
+    delay(3000);  // Pause for a moment
+    }
 }
 
 void loop() {
@@ -174,26 +208,16 @@ void loop() {
   enc.tick();   // обработка всё равно здесь
 
   // Rainbow circuit
-  for(int i=0; i< (strip.numPixels() - startPixel); i++) { // For each pixel in strip...
+  for(int i=0; i< (LEDcount - startPixel); i++) { // For each pixel in strip...
 
     // Color wheel has a range of 65536 Hues
-    int pixelHue = baseHue + (i * 65536L / ((strip.numPixels() - startPixel) / totalRainbows));
+    int pixelHue = baseHue + (i * 65536L / ((LEDcount - startPixel) / totalRainbows));
 
     strip.setPixelColor(startPixel + i, strip.gamma32(strip.ColorHSV(pixelHue)));
   }
 
   // Check knob once per rotation
   long newPosition = myEnc.read();
-
-//  // Logging
-//  Serial.print("\n");
-//  Serial.print("Encoder: ");
-//  Serial.print("\t");
-//  Serial.print(oldPosition);
-//  Serial.print("\t");
-//  Serial.print(newPosition);
-//  Serial.print("\t");
-//  Serial.print(newPosition - oldPosition);
 
   if (newPosition != oldPosition){
     velocity += (newPosition - oldPosition);
@@ -207,8 +231,8 @@ void loop() {
     direction = -1;
   }
 
-  // Initial, less dynamic strand for scaffolding
-  for (int i = 0; i < startPixel; i++){
+  // Non-rainbow portion at start of strand
+  for (int i = 0; i < startPixel && i < LEDcount; i++){
     strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(baseHue, staticSaturation)));
   }
   
@@ -228,15 +252,6 @@ void loop() {
   else if (vmax < velocity){
     velocity = vmax;
   }
-
-//  // Logging
-//  Serial.print("\t\t");
-//  Serial.print("Velocity: ");
-//  Serial.print("\t");
-//  Serial.print(velocity); 
-//  Serial.print("\t\t");
-//  Serial.print("Rainbows: ");
-//  Serial.print(totalRainbows);
 
   baseHue += 256 * direction;
   baseHue += 256 * (velocity / 10);
